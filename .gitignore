@@ -26,3 +26,8 @@ __pycache__/
 
 # Logs
 *.log
+
+# SQLite
+service.db
+service.db-shm
+service.db-wal
