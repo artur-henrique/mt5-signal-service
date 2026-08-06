@@ -1,0 +1,28 @@
+# Ambiente virtual
+venv/
+
+# Variáveis de ambiente
+.env
+
+# Sessão do Telethon
+telegram_session.session
+*.session
+*.session-journal
+
+# Banco de dados
+service.db
+
+# Cache Python
+__pycache__/
+*.py[cod]
+*.pyo
+
+# Arquivos do macOS
+.DS_Store
+
+# IDEs
+.vscode/
+.idea/
+
+# Logs
+*.log
