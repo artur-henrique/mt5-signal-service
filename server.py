@@ -6,6 +6,10 @@ Endpoints:
                                (since_id) + token + conta, e a requisição
                                fica "pendurada" até aparecer sinal novo ou
                                estourar o timeout.
+  GET  /api/signals/latest_id -- retorna o id mais recente já publicado na
+                               fila (sem esperar) -- usado pelo EA na
+                               primeira execução, para começar a escutar só
+                               a partir de agora, sem reprocessar o histórico.
   POST /api/log            -- EA reporta eventos (ordem aberta/fechada,
                                heartbeat) para você monitorar remotamente.
 
@@ -65,6 +69,13 @@ async def poll_signals(
         if time.time() >= deadline:
             return {"sinais": []}
         await asyncio.sleep(POLL_CHECK_INTERVAL)
+
+
+@app.get("/api/signals/latest_id")
+async def latest_signal_id(token: str = Query(...), account: str = Query(...)):
+    if not storage.validate_client(token, account):
+        raise HTTPException(status_code=401, detail="Token/conta inválidos ou acesso revogado.")
+    return {"latest_id": storage.get_latest_signal_id()}
 
 
 # --------------------------------------------------------------------------

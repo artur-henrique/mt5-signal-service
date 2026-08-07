@@ -7,6 +7,7 @@ Uso:
     python manage_clients.py listar
     python manage_clients.py revogar --token <token>
     python manage_clients.py ativar  --token <token>
+    python manage_clients.py limpar-sinais
 """
 
 import argparse
@@ -30,6 +31,11 @@ def main():
     p_ativar = sub.add_parser("ativar", help="Reativa o acesso de um cliente.")
     p_ativar.add_argument("--token", required=True)
 
+    sub.add_parser(
+        "limpar-sinais",
+        help="Esvazia a fila de sinais (mantém o contador de id avançando -- seguro pra fazer com EAs já rodando).",
+    )
+
     args = parser.parse_args()
     storage.init_db()
 
@@ -52,6 +58,11 @@ def main():
     elif args.comando == "ativar":
         ok = storage.set_client_active(args.token, active=True)
         print("Reativado." if ok else "Token não encontrado.")
+
+    elif args.comando == "limpar-sinais":
+        n = storage.clear_signals()
+        print(f"Fila de sinais esvaziada -- {n} sinal(is) removido(s). "
+              "O contador de id continua de onde estava, então EAs já rodando não são afetados.")
 
 
 if __name__ == "__main__":

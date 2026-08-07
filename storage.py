@@ -136,6 +136,22 @@ def push_signal(payload: dict, telegram_msg_id: Optional[int] = None) -> int:
         return cur.lastrowid
 
 
+def clear_signals() -> int:
+    """
+    Esvazia a fila de sinais (apaga todas as linhas), mas -- de propósito --
+    NÃO reinicia o contador de id. Isso é importante: assim, os próximos
+    sinais publicados continuam recebendo ids maiores que qualquer id antigo,
+    então um EA que já tenha um "último id" salvo continua funcionando
+    normalmente (não vê nada de novo até um sinal genuinamente novo chegar),
+    e uma conta nova (começando do zero) também não encontra nada pra
+    reprocessar, porque a fila está vazia. Retorna quantas linhas foram apagadas.
+    """
+    with _lock, _connect() as conn:
+        cur = conn.execute("DELETE FROM signals")
+        conn.commit()
+        return cur.rowcount
+
+
 def get_signal_by_telegram_msg_id(telegram_msg_id: int) -> Optional[dict]:
     """
     Busca o sinal de ABERTURA original que foi gerado a partir de uma
