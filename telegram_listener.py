@@ -117,5 +117,18 @@ async def start_listener() -> None:
         signal_id = storage.push_signal(sinal, telegram_msg_id=telegram_msg_id)
         logger.info("Sinal #%s publicado: %s", signal_id, sinal)
 
+        if sinal.get("direcao_inferida"):
+            logger.warning(
+                "Sinal #%s: a mensagem não trazia BUY/SELL explícito -- direção '%s' foi "
+                "DEDUZIDA a partir da posição do SL/TP em relação à entrada. Confira se está certo.",
+                signal_id, sinal.get("direcao"),
+            )
+            await notifier.enviar_alerta(
+                f"Sinal #{signal_id} de {sinal.get('ativo')} sem BUY/SELL explícito na mensagem -- "
+                f"deduzi '{sinal.get('direcao')}' pela posição do SL/TP. Confira se está correto.\n\n"
+                f"Mensagem: {texto[:300]}"
+            )
+
+
     logger.info("Listener do Telegram conectado e escutando o canal.")
     await client.run_until_disconnected()

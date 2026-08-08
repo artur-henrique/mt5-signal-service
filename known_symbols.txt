@@ -1,0 +1,79 @@
+# Lista de ativos que o parser reconhece nas mensagens do canal.
+# Um ticker por linha (maiusculo ou minusculo, tanto faz -- o parser
+# ignora isso). Linhas comecando com # sao comentarios e sao ignoradas.
+#
+# Por que essa lista existe: em vez de tentar adivinhar qual palavra da
+# mensagem é o ativo pela posição (o que quebra quando o canal muda a
+# ordem das palavras, ex: "SELL LIMIT GBPUSD" vs "(USDCHF) Sell Limit"),
+# o parser procura por qualquer um destes tickers na mensagem, não
+# importa onde apareça. Se um par novo aparecer no canal e não estiver
+# aqui, o parser não vai reconhecer o sinal -- adicione a linha aqui
+# (sem precisar mudar nenhum código) e reinicie o servico.
+
+# Pares principais
+EURUSD
+GBPUSD
+USDJPY
+USDCHF
+USDCAD
+AUDUSD
+NZDUSD
+
+# Pares cruzados (minor pairs)
+EURGBP
+EURJPY
+EURCHF
+EURAUD
+EURCAD
+EURNZD
+GBPJPY
+GBPCHF
+GBPAUD
+GBPCAD
+GBPNZD
+AUDJPY
+AUDCHF
+AUDCAD
+AUDNZD
+NZDJPY
+NZDCHF
+NZDCAD
+CADJPY
+CADCHF
+CHFJPY
+
+# Pares exoticos (mais raros, mas aparecem em alguns canais)
+USDMXN
+USDZAR
+USDTRY
+USDSEK
+USDNOK
+USDSGD
+USDHKD
+USDPLN
+
+# Metais
+XAUUSD
+XAGUSD
+XPTUSD
+XPDUSD
+
+# Indices
+US30
+US100
+NAS100
+US500
+SPX500
+UK100
+GER40
+GER30
+DAX40
+FRA40
+JPN225
+AUS200
+HK50
+EU50
+
+# Cripto (alguns canais de forex tambem mandam sinais disso)
+BTCUSD
+ETHUSD

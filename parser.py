@@ -18,6 +18,7 @@ livre do tipo "close xauusd" ser vinculado à posição certa.
 import json
 import os
 import re
+from pathlib import Path
 from typing import Optional
 
 from anthropic import Anthropic
@@ -27,6 +28,9 @@ from anthropic import Anthropic
 FALLBACK_MODEL = "claude-haiku-4-5-20251001"
 
 _client: Optional[Anthropic] = None
+
+KNOWN_SYMBOLS_PATH = Path(__file__).parent / "known_symbols.txt"
+_known_symbols_regex: Optional[re.Pattern] = None
 
 
 def _get_anthropic_client() -> Anthropic:
@@ -41,41 +45,130 @@ def _get_anthropic_client() -> Anthropic:
     return _client
 
 
+def _get_known_symbols_regex() -> re.Pattern:
+    """
+    Carrega known_symbols.txt (uma vez, com cache) e monta um regex que
+    acha qualquer um desses tickers em qualquer lugar do texto -- em vez
+    de depender da posição das palavras, que varia entre mensagens do
+    canal (ex: "SELL LIMIT GBPUSD" vs "(USDCHF) Sell Limit").
+    """
+    global _known_symbols_regex
+    if _known_symbols_regex is not None:
+        return _known_symbols_regex
+
+    tickers = []
+    if KNOWN_SYMBOLS_PATH.exists():
+        for linha in KNOWN_SYMBOLS_PATH.read_text(encoding="utf-8").splitlines():
+            linha = linha.strip()
+            if not linha or linha.startswith("#"):
+                continue
+            tickers.append(linha.upper())
+
+    if not tickers:
+        # Lista vazia faria o regex casar com QUALQUER coisa (padrão vazio) --
+        # em vez disso, usa um padrão que nunca casa, forçando cair no fallback.
+        _known_symbols_regex = re.compile(r"(?!x)x")
+        return _known_symbols_regex
+
+    # Tickers mais longos primeiro, pra um ticker que "contém" outro
+    # (não deveria acontecer com esses símbolos, mas por segurança) não
+    # ser cortado pela metade.
+    tickers.sort(key=len, reverse=True)
+    padrao = r"\b(" + "|".join(re.escape(t) for t in tickers) + r")\b"
+    _known_symbols_regex = re.compile(padrao, re.IGNORECASE)
+    return _known_symbols_regex
+
+
+def _buscar_ativo_conhecido(texto: str) -> Optional[str]:
+    match = _get_known_symbols_regex().search(texto)
+    return match.group(1).upper() if match else None
+
+
 # --------------------------------------------------------------------------
 # Categoria 1: sinal estruturado de abertura
 # --------------------------------------------------------------------------
 
-_STRUCTURED_RE = re.compile(
-    r"""
-    (?P<direcao>BUY|SELL)\s+(?P<ativo>[A-Z]{5,6})
-    .*?
-    Entry\s*-\s*(?P<entry>[\d.]+)
-    .*?
-    SL\s*-\s*(?P<sl>[\d.]+)
-    .*?
-    Tp\s*-\s*(?P<tp>[\d.]+)
-    """,
-    re.IGNORECASE | re.DOTALL | re.VERBOSE,
-)
-
-
 def try_parse_structured(texto: str) -> Optional[dict]:
-    """Tenta casar o texto com o formato estruturado de abertura de trade."""
-    match = _STRUCTURED_RE.search(texto)
-    if not match:
+    """
+    Tenta reconhecer um sinal de abertura de trade. Extrai cada campo de
+    forma independente da posição das palavras no texto (direção, ativo,
+    entry/sl/tp, tipo de ordem podem vir em qualquer ordem/formato) --
+    isso é importante porque o canal varia o formato entre mensagens
+    (ex: "SELL LIMIT GBPUSD" vs "(USDCHF) Sell Limit").
+    """
+    ativo = _buscar_ativo_conhecido(texto)
+    if not ativo:
         return None
 
-    is_market = bool(re.search(r"\bCMP\b", texto, re.IGNORECASE))
+    m_entry = re.search(r"Entry\s*-\s*([\d.]+)", texto, re.IGNORECASE)
+    m_sl = re.search(r"\bSL\s*-\s*([\d.]+)", texto, re.IGNORECASE)
+    m_tp = re.search(r"\bTp\s*-\s*([\d.]+)", texto, re.IGNORECASE)
+    if not (m_entry and m_sl and m_tp):
+        return None
 
-    return {
+    entry = float(m_entry.group(1))
+    sl = float(m_sl.group(1))
+    tp = float(m_tp.group(1))
+
+    m_direcao = re.search(r"\b(BUY|SELL)\b", texto, re.IGNORECASE)
+    direcao_inferida = False
+
+    if m_direcao:
+        direcao = m_direcao.group(1).upper()
+    else:
+        # Não veio BUY/SELL explícito -- tenta inferir pela posição
+        # relativa de SL/TP em torno da entrada, que é matematicamente
+        # inequívoca quando os valores fazem sentido: SL acima e TP
+        # abaixo da entrada só pode ser venda, e vice-versa. Se não for
+        # coerente (SL/TP do mesmo lado, ou iguais à entrada), não dá
+        # pra inferir com segurança -- melhor ignorar do que arriscar.
+        if sl > entry and tp < entry:
+            direcao = "SELL"
+            direcao_inferida = True
+        elif sl < entry and tp > entry:
+            direcao = "BUY"
+            direcao_inferida = True
+        else:
+            return None
+
+    tem_cmp = bool(re.search(r"\bCMP\b", texto, re.IGNORECASE))
+    tem_market = bool(re.search(r"\bMARKET\b", texto, re.IGNORECASE))
+    is_market = tem_cmp or tem_market
+    # Nota: "STOP" (ordem stop pendente) é tratado como "limit" por enquanto --
+    # o EA hoje só distingue mercado vs. limite.
+
+    resultado = {
         "acao": "abrir",
-        "ativo": match.group("ativo").upper(),
-        "direcao": match.group("direcao").upper(),
+        "ativo": ativo,
+        "direcao": direcao,
         "tipo_ordem": "market" if is_market else "limit",
-        "entry": float(match.group("entry")),
-        "sl": float(match.group("sl")),
-        "tp": float(match.group("tp")),
+        "entry": entry,
+        "sl": sl,
+        "tp": tp,
     }
+    if direcao_inferida:
+        # Não vai pro EA como campo problemático (ele ignora chaves que
+        # não conhece) -- é só pra o listener logar/alertar que a direção
+        # foi deduzida, não veio explícita na mensagem.
+        resultado["direcao_inferida"] = True
+
+    return resultado
+
+
+def parece_sinal_sem_ativo_reconhecido(texto: str) -> bool:
+    """
+    Detecta o caso "isso claramente parece um sinal de trade (tem Entry/SL/Tp),
+    mas nenhum ativo conhecido foi encontrado" -- provavelmente um par novo
+    que ainda não está no known_symbols.txt. Usado só para logar um aviso
+    mais específico do que "mensagem ignorada", ajudando a perceber rápido
+    quando precisa adicionar um ticker novo na lista.
+    """
+    tem_entry_sl_tp = (
+        re.search(r"Entry\s*-\s*[\d.]+", texto, re.IGNORECASE)
+        and re.search(r"\bSL\s*-\s*[\d.]+", texto, re.IGNORECASE)
+        and re.search(r"\bTp\s*-\s*[\d.]+", texto, re.IGNORECASE)
+    )
+    return bool(tem_entry_sl_tp) and _buscar_ativo_conhecido(texto) is None
 
 
 # --------------------------------------------------------------------------
@@ -242,6 +335,21 @@ def parse_message(texto: str, contexto_sinal_original: Optional[dict] = None) ->
         if novo_tp is not None:
             resultado["novo_tp"] = novo_tp
         if contexto_sinal_original:
+            resultado["sinal_id_referenciado"] = contexto_sinal_original.get("id")
+            if not resultado["ativos"] and contexto_sinal_original.get("ativo"):
+                resultado["ativos"] = [contexto_sinal_original["ativo"]]
+        return resultado
+
+    if interpretado["acao"] in ("fechar", "breakeven"):
+        resultado = {
+            "acao": interpretado["acao"],
+            "escopo": interpretado["escopo"],
+            "ativos": interpretado["ativos"],
+        }
+        if contexto_sinal_original:
+            # Referência precisa: a mensagem é resposta a um sinal específico,
+            # então a ação deve valer só pra ELE -- não pra qualquer posição
+            # do mesmo ativo (que poderia haver mais de uma).
             resultado["sinal_id_referenciado"] = contexto_sinal_original.get("id")
             if not resultado["ativos"] and contexto_sinal_original.get("ativo"):
                 resultado["ativos"] = [contexto_sinal_original["ativo"]]
