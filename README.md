@@ -129,12 +129,40 @@ deve ver no terminal onde o `python main.py` está rodando um log tipo
 `Sinal #1 publicado: {...}`. Rodando o `curl` de novo (com `since_id=0`),
 o sinal deve aparecer na resposta.
 
-## 7. Próximos passos
+## 7. Alertas no Telegram (opcional, mas recomendado)
 
-- O EA (MQL5) que roda no computador slave, consulta esse endpoint de
-  polling e executa as ordens — ainda não construído, é a próxima etapa
+O servidor pode te avisar no Telegram quando algo dá errado — ativo não
+reconhecido, ordem que falhou, ou a trava de segurança de lote grande
+disparando — sem precisar checar o log da EC2 ou entrar no MT5.
+
+**Como configurar:**
+
+1. Defina um destino no `.env`:
+   ```
+   TELEGRAM_ALERT_CHAT=me
+   ```
+   `me` manda pra "Mensagens Salvas" da sua própria conta do Telegram —
+   é a opção mais simples pra começar. Se preferir um canal/grupo
+   separado só pra alertas, crie um, e use o `list_channels.py` (mesmo
+   comando que usamos pra achar o canal de sinais) pra pegar o ID dele.
+
+2. Reinicie o serviço. Não precisa de nenhuma credencial nova — os
+   alertas usam a mesma sessão do Telegram que o listener já usa.
+
+**O que gera alerta:**
+- Uma mensagem do canal "parece" um sinal de trade (tem Entry/SL/Tp) mas
+  o ativo não está no `known_symbols.txt`
+- O EA reporta que uma ordem falhou, que um sinal foi ignorado por regra
+  de risco (lote fora do range da conta), ou que a trava de segurança de
+  lote grande (`InpMaxSinaisPorLote`) disparou
+
+Eventos de rotina (ordem aberta com sucesso, heartbeat, etc.) não geram
+alerta, pra não virar ruído — só os que realmente pedem sua atenção.
+
+## 8. Próximos passos
+
 - Revogar acesso de um cliente: `python manage_clients.py revogar --token TOKEN`
-- Ver os logs que os EAs reportam (depois que o EA existir):
+- Ver os logs que os EAs reportam:
   `curl -H "X-Admin-Token: SEU_ADMIN_TOKEN" http://localhost:8000/admin/logs`
 
 ## Estrutura dos arquivos
@@ -145,9 +173,15 @@ mt5-signal-service/
 ├── server.py              # API HTTP (FastAPI) consultada pelos EAs
 ├── telegram_listener.py   # escuta o canal do Telegram (Telethon)
 ├── parser.py               # interpreta as mensagens (regex + fallback IA)
+├── notifier.py              # envia alertas de erro pro Telegram
 ├── storage.py              # persistência em SQLite (clientes, sinais, logs)
 ├── manage_clients.py        # CLI para criar/revogar acesso de clientes
+├── list_channels.py          # lista chats/canais do Telegram e seus IDs
+├── known_symbols.txt          # lista de ativos que o parser reconhece
 ├── requirements.txt
 ├── .env.example
-└── service.db               # criado automaticamente na primeira execução
+├── .gitignore
+├── signal-copier.service      # unit file do systemd (produção)
+├── mql5/                      # EA (MQL5) que roda no MT5
+└── service.db                 # criado automaticamente na primeira execução
 ```

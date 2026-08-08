@@ -15,7 +15,8 @@ import os
 from telethon import TelegramClient, events
 
 import storage
-from parser import parse_message
+import notifier
+from parser import parse_message, parece_sinal_sem_ativo_reconhecido
 
 logger = logging.getLogger("telegram_listener")
 
@@ -44,6 +45,7 @@ async def start_listener() -> None:
     channel_setting = _parse_channel_setting(os.environ["TELEGRAM_CHANNEL"])
     client = build_client()
     await client.start()
+    notifier.registrar_client(client)
 
     # Aquece o cache de entidades da sessão -- sem isso, o Telethon pode
     # falhar com "Cannot find any entity corresponding to X" ao tentar
@@ -84,10 +86,27 @@ async def start_listener() -> None:
             sinal = parse_message(texto, contexto_sinal_original=contexto_sinal_original)
         except Exception:
             logger.exception("Falha ao interpretar mensagem, ignorando.")
+            await notifier.enviar_alerta(
+                f"Falha ao interpretar uma mensagem do canal (veja o log do servidor pro detalhe).\n"
+                f"Mensagem: {texto[:200]}"
+            )
             return
 
         if sinal is None:
-            logger.info("Mensagem sem ação acionável, ignorada.")
+            if parece_sinal_sem_ativo_reconhecido(texto):
+                logger.warning(
+                    "Mensagem parece um sinal de trade (tem Entry/SL/Tp), mas o ativo NÃO foi "
+                    "reconhecido -- pode ser um par novo que falta em known_symbols.txt. "
+                    "Mensagem: %s",
+                    texto[:200].replace("\n", " "),
+                )
+                await notifier.enviar_alerta(
+                    "Sinal recebido com um ativo que eu não reconheço (pode ser um par novo).\n"
+                    "Adicione o ticker em known_symbols.txt e reinicie o serviço.\n\n"
+                    f"Mensagem: {texto[:300]}"
+                )
+            else:
+                logger.info("Mensagem sem ação acionável, ignorada.")
             return
 
         # Guarda o ID da mensagem do Telegram só em sinais de abertura --

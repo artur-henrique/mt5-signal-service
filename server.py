@@ -21,12 +21,14 @@ Endpoints:
 """
 
 import asyncio
+import json
 import os
 import time
 
 from fastapi import FastAPI, Header, HTTPException, Query
 from pydantic import BaseModel
 
+import notifier
 import storage
 
 app = FastAPI(title="Signal Copier Service")
@@ -89,11 +91,24 @@ class LogEvent(BaseModel):
     payload: dict = {}
 
 
+# Eventos que o EA reporta e que valem um alerta imediato -- os demais
+# (ordem_aberta, ordem_fechada, heartbeat, sinal_recebido, etc.) são
+# operação normal e não geram alerta, pra não virar ruído.
+_EVENTOS_DE_ALERTA = {"erro", "ordem_ignorada", "lote_grande_ignorado"}
+
+
 @app.post("/api/log")
 async def post_log(evento: LogEvent):
     if not storage.validate_client(evento.token, evento.account):
         raise HTTPException(status_code=401, detail="Token/conta inválidos ou acesso revogado.")
     storage.push_log(evento.token, evento.account, evento.event_type, evento.payload)
+
+    if evento.event_type in _EVENTOS_DE_ALERTA:
+        await notifier.enviar_alerta(
+            f"Conta {evento.account} -- {evento.event_type}\n"
+            f"{json.dumps(evento.payload, ensure_ascii=False)}"
+        )
+
     return {"status": "ok"}
 
 
